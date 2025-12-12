@@ -228,3 +228,37 @@ trimsrt2h() {
 
   echo "Created: $outfile"
 }
+rtp_srt() {
+  local url="$1"
+
+  # Download video
+  yt-dlp "$url"
+
+  local video
+  video=$(ls -t *.mp4 *.mkv *.webm 2>/dev/null | head -1)
+
+  # Try RTP subtitles first
+  yt-dlp \
+    --write-subs \
+    --sub-format vtt \
+    --convert-subs srt \
+    --skip-download \
+    "$url"
+
+  # If no SRT was created, fall back to Whisper
+  if ! ls *.srt >/dev/null 2>&1; then
+    echo "No RTP subtitles found — running Whisper..."
+    ffmpeg -i "$video" -vn -acodec mp3 temp-audio.mp3
+
+    whispercpp \
+      -m ~/dev/whisper.cpp/models/ggml-large-v3-turbo.bin \
+      -f temp-audio.mp3 \
+      -l pt \
+      -osrt
+
+    mv temp-audio.mp3.srt "${video%.*}.srt"
+    rm temp-audio.mp3
+  fi
+
+  echo "Done: $video + ${video%.*}.srt"
+}
