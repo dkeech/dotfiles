@@ -231,34 +231,63 @@ trimsrt2h() {
 rtp_srt() {
   local url="$1"
 
-  # Download video
+  # 0) Capture "before" list of videos in this directory
+  local before
+  before=$(mktemp)
+  find . -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.webm' \) -print0 \
+    | xargs -0 -I{} stat -f "%m %N" "{}" 2>/dev/null \
+    | sort -nr > "$before"
+
+  # 1) Download video
   yt-dlp "$url"
 
+  # 2) Capture "after" list and pick newest file not in before
+  local after
+  after=$(mktemp)
+  find . -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.webm' \) -print0 \
+    | xargs -0 -I{} stat -f "%m %N" "{}" 2>/dev/null \
+    | sort -nr > "$after"
+
   local video
-  video=$(ls -t *.mp4 *.mkv *.webm 2>/dev/null | head -1)
+  video=$(comm -13 "$before" "$after" | head -1 | cut -d' ' -f2-)
 
-  # Try RTP subtitles first
-  yt-dlp \
-    --write-subs \
-    --sub-format vtt \
-    --convert-subs srt \
-    --skip-download \
-    "$url"
+  rm -f "$before" "$after"
 
-  # If no SRT was created, fall back to Whisper
-  if ! ls *.srt >/dev/null 2>&1; then
+  # If it was "already downloaded", comm may find nothing. Fall back to newest overall.
+  if [[ -z "$video" ]]; then
+    video=$(find . -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.webm' \) \
+      -print0 | xargs -0 stat -f "%m %N" 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
+  fi
+
+  if [[ -z "$video" ]]; then
+    echo "ERROR: No video file found in current directory."
+    return 1
+  fi
+
+  # strip leading ./ for nicer names
+  video="${video#./}"
+
+  # 3) Try RTP subtitles first (no download)
+  yt-dlp --skip-download --write-subs --sub-format vtt --convert-subs srt "$url"
+
+  # 4) If no .srt exists, run Whisper on extracted audio
+  local out_srt="${video%.*}.srt"
+
+  if [[ ! -f "$out_srt" ]]; then
     echo "No RTP subtitles found — running Whisper..."
-    ffmpeg -i "$video" -vn -acodec mp3 temp-audio.mp3
+    ffmpeg -y -i "$video" -vn -acodec mp3 temp-audio.mp3
 
     whispercpp \
-      -m ~/dev/whisper.cpp/models/ggml-large-v3-turbo.bin \
+      -m "$HOME/dev/whisper.cpp/models/ggml-large-v3-turbo.bin" \
       -f temp-audio.mp3 \
       -l pt \
       -osrt
 
-    mv temp-audio.mp3.srt "${video%.*}.srt"
-    rm temp-audio.mp3
+    mv -f temp-audio.mp3.srt "$out_srt"
+    rm -f temp-audio.mp3
   fi
 
-  echo "Done: $video + ${video%.*}.srt"
+  echo "Done:"
+  echo "  Video: $video"
+  echo "  Subs : $out_srt"
 }
