@@ -229,65 +229,56 @@ trimsrt2h() {
   echo "Created: $outfile"
 }
 rtp_srt() {
-  local url="$1"
+  local prefix="$1"
+  local num="$2"
+  local url="$3"
 
-  # 0) Capture "before" list of videos in this directory
-  local before
-  before=$(mktemp)
-  find . -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.webm' \) -print0 \
-    | xargs -0 -I{} stat -f "%m %N" "{}" 2>/dev/null \
-    | sort -nr > "$before"
-
-  # 1) Download video
-  yt-dlp "$url"
-
-  # 2) Capture "after" list and pick newest file not in before
-  local after
-  after=$(mktemp)
-  find . -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.webm' \) -print0 \
-    | xargs -0 -I{} stat -f "%m %N" "{}" 2>/dev/null \
-    | sort -nr > "$after"
-
-  local video
-  video=$(comm -13 "$before" "$after" | head -1 | cut -d' ' -f2-)
-
-  rm -f "$before" "$after"
-
-  # If it was "already downloaded", comm may find nothing. Fall back to newest overall.
-  if [[ -z "$video" ]]; then
-    video=$(find . -maxdepth 1 -type f \( -iname '*.mp4' -o -iname '*.mkv' -o -iname '*.webm' \) \
-      -print0 | xargs -0 stat -f "%m %N" 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)
-  fi
-
-  if [[ -z "$video" ]]; then
-    echo "ERROR: No video file found in current directory."
+  if [[ -z "$prefix" || -z "$num" || -z "$url" ]]; then
+    echo "Usage: rtp_srt <prefix> <number> <RTP_URL>"
+    echo "Example: rtp_srt bvb 17 https://www.rtp.pt/play/..."
     return 1
   fi
 
-  # strip leading ./ for nicer names
-  video="${video#./}"
+  local base="${prefix}${num}"
+  local video="${base}.mp4"
+  local srt="${base}.srt"
 
-  # 3) Try RTP subtitles first (no download)
-  yt-dlp --skip-download --write-subs --sub-format vtt --convert-subs srt "$url"
+  # 1) Download video with forced filename
+  yt-dlp \
+    -o "${base}.%(ext)s" \
+    "$url"
 
-  # 4) If no .srt exists, run Whisper on extracted audio
-  local out_srt="${video%.*}.srt"
+  if [[ ! -f "$video" ]]; then
+    echo "ERROR: Expected video file not found: $video"
+    return 1
+  fi
 
-  if [[ ! -f "$out_srt" ]]; then
+  # 2) Try RTP subtitles first (no download)
+  yt-dlp \
+    --skip-download \
+    --write-subs \
+    --sub-format vtt \
+    --convert-subs srt \
+    -o "${base}.%(ext)s" \
+    "$url"
+
+  # 3) If no SRT exists, run Whisper
+  if [[ ! -f "$srt" ]]; then
     echo "No RTP subtitles found — running Whisper..."
-    ffmpeg -y -i "$video" -vn -acodec mp3 temp-audio.mp3
+
+    ffmpeg -y -i "$video" -vn -acodec mp3 "${base}.mp3"
 
     whispercpp \
       -m "$HOME/dev/whisper.cpp/models/ggml-large-v3-turbo.bin" \
-      -f temp-audio.mp3 \
+      -f "${base}.mp3" \
       -l pt \
       -osrt
 
-    mv -f temp-audio.mp3.srt "$out_srt"
-    rm -f temp-audio.mp3
+    mv -f "${base}.mp3.srt" "$srt"
+    rm -f "${base}.mp3"
   fi
 
   echo "Done:"
   echo "  Video: $video"
-  echo "  Subs : $out_srt"
+  echo "  Subs : $srt"
 }
