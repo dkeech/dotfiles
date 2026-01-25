@@ -111,15 +111,7 @@ alias cfp="code \$(fzf --preview 'bat --color=always --style=header,grid --line-
 alias cd="z"
 alias lsvol="df -h | awk '\$9 ~ /^\/Volumes/ {print \$4, \$9}'"
 
-export NVM_DIR="$➜  T7 Touch lsvol
-                                                                  │awk: syntax error at source line 1
-                                                                  │ context is
-                                                                  │         >>>  ~ <<<
-                                                                  │awk: bailing out at source line 1➜  T7 Touch lsvol
-                                                                  │awk: syntax error at source line 1
-                                                                  │ context is
-                                                                  │         >>>  ~ <<<
-                                                                  │awk: bailing out at source line 1HOME/.nvm"
+export NVM_DIR="$HOME/.nvm"
 [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"  # This loads nvm
 [ -s "/opt/homebrew/opt/nvm/etc/bash_completion" ] && \. "/opt/homebrew/opt/nvm/etc/bash_completion"  # This loads nvm bash_completion
 
@@ -190,6 +182,35 @@ ytpt() {
     -f "$file"
 }
 
+ytsrt() {
+  local cleaned="${1//\\}"
+  local lang="${2:-en}"
+  local outbase="ytsrt_$(date +%Y%m%d_%H%M%S)_$$"
+
+  if [[ -z "$cleaned" ]]; then
+    echo "usage: ytsrt <url> [lang]" >&2
+    return 1
+  fi
+
+  # 1. Download only audio
+  yt-dlp -x --audio-format mp3 --no-playlist -o "${outbase}.%(ext)s" "$cleaned"
+
+  # 2. Select the most recently downloaded mp3
+  local file
+  file="${outbase}.mp3"
+  if [[ ! -f "$file" ]]; then
+    echo "no mp3 found after download: $file" >&2
+    return 1
+  fi
+
+  # 3. Run Whisper to create an SRT next to the MP3
+  "$HOME/dev/whisper.cpp/build/bin/whisper-cli" \
+    -m "$HOME/dev/whisper.cpp/models/ggml-large-v3-turbo.bin" \
+    -l "$lang" \
+    -osrt \
+    -f "$file"
+}
+
 trim2h() {
   # $1 = input filename
   local infile="$1"
@@ -228,6 +249,110 @@ trimsrt2h() {
 
   echo "Created: $outfile"
 }
+
+# mp4 → 16k mono wav → whispercpp → .srt (beam search + best-of)
+# Usage:
+#   mp4_srt /path/to/video.mp4
+#   mp4_srt /path/to/video.mp4 /path/to/output.srt
+#   mp4_srt /path/to/video.mp4  (uses same basename, writes alongside video)
+#
+# Optional env vars:
+#   WHISPER_MODEL  : path to model (default: large-v3-turbo)
+#   WHISPER_LANG   : language code (default: pt)
+#   WHISPER_BS     : beam size (default: 5)
+#   WHISPER_BO     : best-of (default: 5)
+#   WHISPER_GPU    : set to 0 to disable GPU if you ever need to (default: 1)
+#
+mp4_srt() {
+  emulate -L zsh
+  setopt pipefail
+
+  local in="$1"
+  local out="$2"
+
+  if [[ -z "$in" ]]; then
+    echo "Usage: mp4_srt <input.mp4> [output.srt]"
+    return 1
+  fi
+
+  if [[ ! -f "$in" ]]; then
+    echo "ERROR: file not found: $in"
+    return 1
+  fi
+
+  # Defaults (override via env vars)
+  local model="${WHISPER_MODEL:-$HOME/dev/whisper.cpp/models/ggml-large-v3-turbo.bin}"
+  local lang="${WHISPER_LANG:-pt}"
+  local bs="${WHISPER_BS:-5}"
+  local bo="${WHISPER_BO:-5}"
+  local gpu="${WHISPER_GPU:-1}"
+
+  if [[ ! -f "$model" ]]; then
+    echo "ERROR: model not found: $model"
+    echo "Set WHISPER_MODEL to a valid .bin in your whisper.cpp models dir."
+    return 1
+  fi
+
+  # Output defaults to: same folder, same basename, .srt
+  if [[ -z "$out" ]]; then
+    local dir base
+    dir="$(dirname "$in")"
+    base="$(basename "$in")"
+    base="${base%.*}"
+    out="${dir}/${base}.srt"
+  fi
+
+  # Temp WAV next to input (safer than /tmp on external drives sometimes)
+  local wav="${out:r}.wav"
+
+  # Dependencies
+  command -v ffmpeg >/dev/null || { echo "ERROR: ffmpeg not found (brew install ffmpeg)"; return 1; }
+  command -v whispercpp >/dev/null || { echo "ERROR: whispercpp not found in PATH"; return 1; }
+
+  echo "Extracting WAV (16kHz mono) …"
+  ffmpeg -hide_banner -loglevel error -y \
+    -i "$in" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$wav"
+
+  if [[ ! -f "$wav" ]]; then
+    echo "ERROR: failed to create wav: $wav"
+    return 1
+  fi
+
+  echo "Running whispercpp (lang=$lang, bs=$bs, bo=$bo) …"
+  # Some builds support --use-gpu; others default to GPU automatically.
+  # Your log showed "use gpu = 1" already, so we just pass beam/best-of and let it use Metal.
+  whispercpp \
+    -m "$model" \
+    -f "$wav" \
+    -l "$lang" \
+    -osrt \
+    -bs "$bs" \
+    -bo "$bo"
+
+  # whispercpp commonly outputs "<wav>.srt"
+  local produced="${wav}.srt"
+
+  if [[ ! -f "$produced" ]]; then
+    # Some builds output "<base>.srt" instead; check a couple of likely names
+    local alt1="${wav:r}.srt"
+    local alt2="${out:t}"
+    if [[ -f "$alt1" ]]; then
+      produced="$alt1"
+    elif [[ -f "$alt2" ]]; then
+      produced="$alt2"
+    else
+      echo "ERROR: whispercpp did not produce an SRT. Look for *.srt in: $(dirname "$wav")"
+      rm -f "$wav"
+      return 1
+    fi
+  fi
+
+  mv -f -- "$produced" "$out"
+  rm -f -- "$wav"
+
+  echo "Done:"
+  echo "  SRT: $out"
+}
 rtp_srt() {
   local prefix="$1"
   local num="$2"
@@ -235,7 +360,7 @@ rtp_srt() {
 
   if [[ -z "$prefix" || -z "$num" || -z "$url" ]]; then
     echo "Usage: rtp_srt <prefix> <number> <RTP_URL>"
-    echo "Example: rtp_srt bvb 17 https://www.rtp.pt/play/..."
+    echo "Example: rtp_srt bvb 70 https://www.rtp.pt/play/..."
     return 1
   fi
 
@@ -243,28 +368,40 @@ rtp_srt() {
   local video="${base}.mp4"
   local srt="${base}.srt"
 
+  # Make behavior deterministic even if you have ~/.config/yt-dlp/config options like --sub-langs
+  local YTDLP=(yt-dlp --ignore-config)
+
+  # 0) Show what subs yt-dlp thinks exist (debuggable + fast)
+  echo "== Available subtitles (if any) =="
+  "${YTDLP[@]}" --skip-download --list-subs "$url" || true
+  echo
+
   # 1) Download video with forced filename
-  yt-dlp \
-    -o "${base}.%(ext)s" \
-    "$url"
+  "${YTDLP[@]}" -o "${base}.%(ext)s" "$url"
 
   if [[ ! -f "$video" ]]; then
     echo "ERROR: Expected video file not found: $video"
     return 1
   fi
 
-  # 2) Try RTP subtitles first (no download)
-  yt-dlp \
+  # 2) Try to download + convert RTP subtitles (prefer vtt/ttml, fall back to best)
+  #    --write-subs: "real" subs
+  #    --write-auto-subs: if the site exposes auto-captions as a separate track (harmless if none)
+  rm -f "$srt" "${base}."*.srt "${base}."*.vtt "${base}."*.ttml 2>/dev/null
+
+  "${YTDLP[@]}" \
     --skip-download \
     --write-subs \
-    --sub-format vtt \
+    --write-auto-subs \
+    --sub-langs "all" \
+    --sub-format "vtt/ttml/best" \
     --convert-subs srt \
     -o "${base}.%(ext)s" \
     "$url"
 
-  # 3) If no SRT exists, run Whisper
+  # 3) If no SRT exists, run Whisper (audio transcription fallback)
   if [[ ! -f "$srt" ]]; then
-    echo "No RTP subtitles found — running Whisper..."
+    echo "No RTP subtitle track detected/downloaded — running Whisper..."
 
     ffmpeg -y -i "$video" -vn -acodec mp3 "${base}.mp3"
 
@@ -282,3 +419,5 @@ rtp_srt() {
   echo "  Video: $video"
   echo "  Subs : $srt"
 }
+
+export PATH="$HOME/.local/bin:$PATH"
