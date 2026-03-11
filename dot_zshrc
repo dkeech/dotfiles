@@ -420,4 +420,108 @@ rtp_srt() {
   echo "  Subs : $srt"
 }
 
+podcast_srt() {
+  local rss_url="$1"
+  local lang="${2:-pt}"
+
+  if [[ -z "$rss_url" ]]; then
+    echo "Usage: podcast_srt <rss_url> [lang]"
+    return 1
+  fi
+
+  # Ask for output directory
+  local output_dir
+  echo -n "Output directory [$(pwd)]: "
+  read output_dir
+  output_dir="${output_dir:-$(pwd)}"
+  output_dir="${output_dir/#\~/$HOME}"
+
+  mkdir -p "$output_dir" || { echo "ERROR: could not create $output_dir"; return 1; }
+
+  local model="${WHISPER_MODEL:-$HOME/dev/whisper.cpp/models/ggml-large-v3-turbo.bin}"
+
+  if [[ ! -f "$model" ]]; then
+    echo "ERROR: model not found: $model"
+    echo "Set WHISPER_MODEL to a valid .bin in your whisper.cpp models dir."
+    return 1
+  fi
+
+  command -v whispercpp >/dev/null || { echo "ERROR: whispercpp not found in PATH"; return 1; }
+
+  echo "Downloading episodes to: $output_dir"
+  yt-dlp -x --audio-format wav \
+    --extractor-args "generic:impersonate" \
+    -o "$output_dir/%(title)s.%(ext)s" \
+    "$rss_url"
+
+  echo
+  echo "Transcribing WAV files (lang=$lang) …"
+  local f
+  for f in "$output_dir"/*.wav; do
+    [[ -f "$f" ]] || continue
+    echo "  → $f"
+    whispercpp \
+      -m "$model" \
+      -l "$lang" \
+      -osrt \
+      -f "$f"
+  done
+
+  echo
+  echo "Done. SRT files are in: $output_dir"
+}
+
+transcribe_mp3s() {
+  local dir="${1:-$(pwd)}"
+  dir="${dir/#\~/$HOME}"
+  local lang="${2:-pt}"
+  local model="${WHISPER_MODEL:-$HOME/dev/whisper.cpp/models/ggml-large-v3-turbo.bin}"
+
+  if [[ ! -d "$dir" ]]; then
+    echo "ERROR: directory not found: $dir"
+    return 1
+  fi
+
+  if [[ ! -f "$model" ]]; then
+    echo "ERROR: model not found: $model"
+    return 1
+  fi
+
+  command -v whispercpp >/dev/null || { echo "ERROR: whispercpp not found"; return 1; }
+  command -v ffmpeg >/dev/null || { echo "ERROR: ffmpeg not found"; return 1; }
+
+  local count=0
+  for mp3 in "$dir"/*.mp3; do
+    [[ -f "$mp3" ]] || continue
+    local base="${mp3%.mp3}"
+    # Skip if already transcribed
+    [[ -f "${base}.wav.srt" || -f "${base}.srt" || -f "${base}.mp3.srt" ]] && continue
+    # Skip if WAV exists (handled by another run)
+    [[ -f "${base}.wav" ]] && continue
+
+    (( count++ ))
+    echo "[$count] $(basename "$mp3")"
+    local tmpwav="${base}.wav"
+
+    ffmpeg -hide_banner -loglevel error -y \
+      -i "$mp3" -vn -ar 16000 -ac 1 -c:a pcm_s16le "$tmpwav"
+
+    if [[ ! -f "$tmpwav" ]]; then
+      echo "  ERROR: ffmpeg conversion failed, skipping"
+      continue
+    fi
+
+    whispercpp \
+      -m "$model" \
+      -l "$lang" \
+      -osrt \
+      -f "$tmpwav"
+
+    rm -f "$tmpwav"
+  done
+
+  echo
+  echo "Done. Transcribed $count files."
+}
+
 export PATH="$HOME/.local/bin:$PATH"
