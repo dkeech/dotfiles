@@ -397,6 +397,15 @@
                                 },
                                 "to": [{ "shell_command": "/usr/bin/osascript -e 'tell application \"System Events\" to key code 18 using control down' -e 'delay 0.4' -e 'tell application id \"com.panic.Transmit\" to activate' -e 'delay 0.1' -e 'tell application id \"com.panic.Transmit\" to activate'" }],
                                 "type": "basic"
+                            },
+                            {
+                                "description": "m = Messages",
+                                "from": {
+                                    "key_code": "m",
+                                    "modifiers": { "mandatory": ["right_command", "right_control", "right_shift", "right_option"] }
+                                },
+                                "to": [{ "shell_command": "open -a Messages" }],
+                                "type": "basic"
                             }
                         ]
                     },
