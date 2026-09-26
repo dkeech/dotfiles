@@ -356,6 +356,26 @@
                         "description": "Hyper Application \u2014 FIXED for Desktop 1 (Firefox, Firefox DE, Transmit)",
                         "manipulators": [
                             {
+                                "description": "a = Finder",
+                                "from": {
+                                    "key_code": "a",
+                                    "modifiers": {
+                                        "mandatory": [
+                                            "right_command",
+                                            "right_control",
+                                            "right_shift",
+                                            "right_option"
+                                        ]
+                                    }
+                                },
+                                "to": [
+                                    {
+                                        "shell_command": "open -a Finder"
+                                    }
+                                ],
+                                "type": "basic"
+                            },
+                            {
                                 "description": "w = Firefox Developer Edition (Desktop 1, reliable)",
                                 "from": {
                                     "key_code": "w",
@@ -379,7 +399,7 @@
                                 "type": "basic"
                             },
                             {
-                                "description": "z = Claude",
+                                "description": "z = Stickies",
                                 "from": {
                                     "key_code": "z",
                                     "modifiers": {
@@ -393,7 +413,7 @@
                                 },
                                 "to": [
                                     {
-                                        "shell_command": "open -b com.anthropic.claudefordesktop"
+                                        "shell_command": "open -a Stickies"
                                     }
                                 ],
                                 "type": "basic"
@@ -454,13 +474,13 @@
                                 },
                                 "to": [
                                     {
-                                        "shell_command": "open -b com.openai.chat"
+                                        "shell_command": "open -b com.openai.codex"
                                     }
                                 ],
                                 "type": "basic"
                             },
                             {
-                                "description": "x = Codex",
+                                "description": "x = cmux",
                                 "from": {
                                     "key_code": "x",
                                     "modifiers": {
@@ -474,7 +494,7 @@
                                 },
                                 "to": [
                                     {
-                                        "shell_command": "open -b com.openai.codex"
+                                        "shell_command": "open -b com.cmuxterm.app"
                                     }
                                 ],
                                 "type": "basic"
@@ -539,27 +559,6 @@
                                 "to": [
                                     {
                                         "shell_command": "/Applications/Firefox.app/Contents/MacOS/firefox --private-window"
-                                    }
-                                ],
-                                "type": "basic"
-                            },
-                            {
-                                "description": "command + r = Finder",
-                                "from": {
-                                    "key_code": "r",
-                                    "modifiers": {
-                                        "mandatory": [
-                                            "left_command",
-                                            "right_command",
-                                            "right_control",
-                                            "right_shift",
-                                            "right_option"
-                                        ]
-                                    }
-                                },
-                                "to": [
-                                    {
-                                        "shell_command": "open -a Finder"
                                     }
                                 ],
                                 "type": "basic"
@@ -728,7 +727,7 @@
                                 "type": "basic"
                             },
                             {
-                                "description": "g = Transmit (Desktop 1, reliable)",
+                                "description": "g = Safari",
                                 "from": {
                                     "key_code": "g",
                                     "modifiers": {
@@ -745,7 +744,7 @@
                                 },
                                 "to": [
                                     {
-                                        "shell_command": "/usr/bin/osascript -e 'tell application \"System Events\" to key code 18 using control down' -e 'delay 0.4' -e 'tell application id \"com.panic.Transmit\" to activate' -e 'delay 0.1' -e 'tell application id \"com.panic.Transmit\" to activate'"
+                                        "shell_command": "open -a Safari"
                                     }
                                 ],
                                 "type": "basic"
